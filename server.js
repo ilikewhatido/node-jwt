@@ -15,7 +15,7 @@ var User = require('./app/models/user'); // get our mongoose model
 // configuration =========
 // =======================
 var port = process.env.PORT || 8080; // used to create, sign, and verify
-										// tokens
+// tokens
 mongoose.connect(config.database); // connect to database
 app.set('superSecret', config.secret); // secret variable
 
@@ -36,36 +36,88 @@ app.get('/', function(req, res) {
 	res.send('Hello!!! The API is at http://localhost:' + port + '/api');
 });
 
-app.get('/setup', function(req, res) {
-
-	// create a sample user
-	var nick = new User({
-		name : 'Nick Cerminara',
-		password : 'password',
-		admin : true
-	});
-
-	// save the sample user
-	nick.save(function(err) {
-		if (err)
-			throw err;
-
-		console.log('User saved successfully');
-		res.json({
-			success : true
-		});
-	});
-});
-
 // API ROUTES -------------------
 
 // get an instance of the router for api routes
 var apiRoutes = express.Router();
 
-// TODO: route to authenticate a user (POST
 // http://localhost:8080/api/authenticate)
+// route to authenticate a user (POST http://localhost:8080/api/authenticate)
+apiRoutes.post('/authenticate', function(req, res) {
 
-// TODO: route middleware to verify a token
+	// find the user
+	User.findOne({
+		_id : req.body.name,
+		password : req.body.password
+	}, function(err, user) {
+
+		if (err)
+			throw err;
+
+		if (!user) {
+			res.json({
+				success : false,
+				message : 'Authentication failed.'
+			});
+		} else {
+
+			var userInfo = {
+				_id : user.name,
+				password : user.password,
+				admin : user.admin
+			}
+			
+			// if user is found and password is right
+			// create a token
+			var token = jwt.sign(userInfo, app.get('superSecret'), {
+				expiresInMinutes : 1440 // expires in 1 hour
+			});
+				// return the information including token as JSON
+			res.json({
+				success : true,
+				message : 'Enjoy your token!',
+				token : token
+			});
+		}
+	});
+});
+
+// route middleware to verify a token
+apiRoutes.use(function(req, res, next) {
+
+	// check header or url parameters or post parameters for token
+	var token = req.body.token || req.query.token
+			|| req.headers['x-access-token'];
+
+	// decode token
+	if (token) {
+
+		// verifies secret and checks exp
+		jwt.verify(token, app.get('superSecret'), function(err, decoded) {
+			if (err) {
+				return res.json({
+					success : false,
+					message : 'Failed to authenticate token.'
+				});
+			} else {
+				// if everything is good, save to request for use in other
+				// routes
+				req.decoded = decoded;
+				next();
+			}
+		});
+
+	} else {
+
+		// if there is no token
+		// return an error
+		return res.status(403).send({
+			success : false,
+			message : 'No token provided.'
+		});
+
+	}
+});
 
 // route to show a random message (GET http://localhost:8080/api/)
 apiRoutes.get('/', function(req, res) {
@@ -80,6 +132,44 @@ apiRoutes.get('/users', function(req, res) {
 		res.json(users);
 	});
 });
+
+// route to delete user by name (DELETE http://localhost:8080/api/users/:name)
+apiRoutes.delete('/users/:name', function(req, res) {
+	User.remove({_id : req.params.name}, function(err) {
+		if (err)
+			throw err;
+
+		console.log('User deleted successfully');
+		res.json({
+			success : true
+		});
+	});
+});
+
+apiRoutes.post('/users', function(req, res) {
+	
+	var name = req.body.name;
+
+	  // create a sample user
+	  var user = new User({ 
+		_id: req.body.name, 
+	    password: req.body.password,
+	    admin: req.body.admin 
+	  });
+
+	  // save the sample user
+	  user.save(function(err) {
+	    if (err) {
+	    	console.log('User saved unsuccessfully');
+	    	//throw err; // this will crash the server
+	    	res.json({ success: false, err: err });
+	    } else {
+		    console.log('User saved successfully');
+		    res.json({ success: true });
+	    }
+	  });
+});
+
 
 // apply the routes to our application with the prefix /api
 app.use('/api', apiRoutes);
